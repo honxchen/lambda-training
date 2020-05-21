@@ -1,12 +1,262 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: "This template will deploy this job."
 
-
 Resources:
-  S3Bucket:
+  NotificateBucket:
     Type: AWS::S3::Bucket
+    DependsOn: S3LambdaPermission
     DeletionPolicy: Retain
     Properties:
-      BucketName: hongxing-jar-bucket
+      BucketName: hongxing-notificate-bucket
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt LambdaFunctionCpS3.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .txt
 
-  
+  LambdaFunctionFromCode:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: com.xing.HelloRequest
+      Role: arn:aws:iam::494526681395:role/for-aws-training-2
+      Code:
+        S3Bucket: hongxing-deployment-bucket
+        S3Key: func/v1/com.xing-1.0-SNAPSHOT.jar
+      Runtime: java8
+      Timeout: 60
+      MemorySize: 512
+
+  SnsLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: com.xing.SnsEventHandler
+      Role: arn:aws:iam::494526681395:role/for-aws-training-2
+      Code:
+        S3Bucket: hongxing-deployment-bucket
+        S3Key: func/v1/com.xing-1.0-SNAPSHOT.jar
+      Runtime: java8
+      Timeout: 60
+      MemorySize: 512
+
+  ApiLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: com.xing.ApiHandler
+      Role: arn:aws:iam::494526681395:role/for-aws-training-2
+      Code:
+        S3Bucket: hongxing-deployment-bucket
+        S3Key: func/v1/com.xing-1.0-SNAPSHOT.jar
+      Runtime: java8
+      Timeout: 60
+      MemorySize: 512
+
+  LambdaFunctionReadS3:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: com.xing.ReadS3File
+      Role: arn:aws:iam::494526681395:role/for-aws-training-2
+      Code:
+        S3Bucket: hongxing-deployment-bucket
+        S3Key: func/v1/com.xing-1.0-SNAPSHOT.jar
+      Runtime: java8
+      Timeout: 60
+      MemorySize: 512
+
+  LambdaFunctionCpS3:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: com.xing.CopyS3File
+      Role: arn:aws:iam::494526681395:role/for-aws-training-2
+      Code:
+        S3Bucket: hongxing-deployment-bucket
+        S3Key: func/v1/com.xing-1.0-SNAPSHOT.jar
+      Runtime: java8
+      Timeout: 60
+      MemorySize: 512
+
+  S3LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref LambdaFunctionCpS3
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub arn:aws:s3:::hongxing-notificate-bucket
+      SourceAccount: 494526681395
+
+  HelloLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref LambdaFunctionFromCode
+      Principal: s3.amazonaws.com
+      SourceArn: !GetAtt LambdaFunctionTrigger.Arn
+      SourceAccount: 494526681395
+
+  LambdaSNSPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref SnsLambdaFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref MessageSNSTopic
+
+  LambdaFunctionTrigger:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: com.xing.LambdaTrigger
+      Role: arn:aws:iam::494526681395:role/for-aws-training-2
+      Code:
+        S3Bucket: hongxing-deployment-bucket
+        S3Key: func/v1/com.xing-1.0-SNAPSHOT.jar
+      Runtime: java8
+      Timeout: 60
+      MemorySize: 512
+
+  MessageSNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: "hongxingTopic"
+
+  SNSSubscription:
+    Type: 'AWS::SNS::Subscription'
+    Properties:
+      TopicArn: !Ref MessageSNSTopic
+      Endpoint: !GetAtt SnsLambdaFunction.Arn
+      Protocol: lambda
+
+  SNSPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref MessageSNSTopic
+      PolicyDocument:
+        Id: MyTopicPolicy
+        Version: '2012-10-17'
+        Statement:
+          - Sid: allow-lambda-subscription
+            Effect: Allow
+            Principal: '*'
+            Action:
+              - sns:Subscribe
+            Resource: !GetAtt SnsLambdaFunction.Arn
+
+
+  myLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 7
+
+  MessageQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      RedrivePolicy:
+        deadLetterTargetArn:
+          Fn::GetAtt:
+            - "DeadLetterQueue"
+            - "Arn"
+        maxReceiveCount: 5
+
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+
+  QueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    DependsOn: MessageQueue
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Id: QueuePolicy
+        Statement:
+          - Sid: Allow-Lambda-SendMessage
+            Effect: Allow
+            Principal: "*"
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt SnsLambdaFunction.Arn
+          - Sid: Allow-Lambda2-SendMessage
+            Effect: Allow
+            Principal: "*"
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt LambdaFunctionFromCode.Arn
+          - Sid: Allow-cpLambda-SendMessage
+            Effect: Allow
+            Principal: "*"
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt LambdaFunctionReadS3.Arn
+      Queues:
+        - !Ref MessageQueue
+
+  ScheduledRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: "ScheduledRule"
+      ScheduleExpression: "rate(2 minutes)"
+      State: "ENABLED"
+      Targets:
+        - Arn:
+            Fn::GetAtt:
+              - "LambdaFunctionReadS3"
+              - "Arn"
+          Id: "TargetFunctionV1"
+
+  RuleLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaFunctionReadS3
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn:
+        Fn::GetAtt:
+          - "ScheduledRule"
+          - "Arn"
+
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: hongxingGW
+      Description: Lambda proxy using quick create
+      ProtocolType: HTTP
+
+  LambdaIntegration:
+    Type: 'AWS::ApiGatewayV2::Integration'
+    DependsOn: ApiLambdaFunction
+    Properties:
+      ApiId: !Ref HttpApi
+      Description: Lambda Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ApiLambdaFunction.Arn}/invocations'
+
+  HttpRoute:
+    Type: 'AWS::ApiGatewayV2::Route'
+    DependsOn:
+      - LambdaIntegration
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: GET /hongxingapi
+      AuthorizationType: NONE
+      Target: !Join
+        - /
+        - - integrations
+          - !Ref LambdaIntegration
+
+  MyStage:
+    Type: 'AWS::ApiGatewayV2::Stage'
+    Properties:
+      StageName: sit
+      Description: sit Stage
+      ApiId: !Ref HttpApi
+      AutoDeploy: true
+
+  LambdaAPIPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref ApiLambdaFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:494526681395:${HttpApi}/*/*/hongxingapi'
