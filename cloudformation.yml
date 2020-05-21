@@ -18,7 +18,7 @@ Resources:
                   - Name: suffix
                     Value: .txt
 
-  LambdaFunctionFromCode:
+  LambdaFunctionHello:
     Type: AWS::Lambda::Function
     Properties:
       Handler: com.xing.HelloRequest
@@ -91,7 +91,7 @@ Resources:
     Type: AWS::Lambda::Permission
     Properties:
       Action: 'lambda:InvokeFunction'
-      FunctionName: !Ref LambdaFunctionFromCode
+      FunctionName: !Ref LambdaFunctionHello
       Principal: s3.amazonaws.com
       SourceArn: !GetAtt LambdaFunctionTrigger.Arn
       SourceAccount: 494526681395
@@ -182,7 +182,7 @@ Resources:
             Principal: "*"
             Action:
               - sqs:SendMessage
-            Resource: !GetAtt LambdaFunctionFromCode.Arn
+            Resource: !GetAtt LambdaFunctionHello.Arn
           - Sid: Allow-cpLambda-SendMessage
             Effect: Allow
             Principal: "*"
